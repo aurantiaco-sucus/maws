@@ -1,0 +1,14 @@
+[package]
+name = "maws"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+maht = { path = "maht" }
+anyhow = { workspace = true }
+
+[workspace]
+members = ["maht"]
+
+[workspace.dependencies]
+anyhow = "1.0.102"
