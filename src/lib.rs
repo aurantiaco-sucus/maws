@@ -1,16 +1,22 @@
-use std::collections::HashMap;
+mod util;
+
+use crate::util::StreamBuffer;
+use anyhow::Context;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::Read;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
-use anyhow::Context;
+use std::{io, thread};
 
 pub struct Config {
-    pub endpoints: HashMap<String, Vec<Endpoint>>,
+    pub endpoints: EndpointMap,
+    pub default_endpoint: EndpointFunc,
     pub addr: SocketAddr,
     pub handler_config: HandlerConfig,
 }
+
+pub type EndpointMap = HashMap<String, BTreeMap<maht::Method, EndpointFunc>>;
 
 #[derive(Clone)]
 pub struct HandlerConfig {
@@ -18,79 +24,99 @@ pub struct HandlerConfig {
     pub len_buf_bail: usize,
     /// timeout before bailing out for not identifying a header
     pub timeout_bail: Duration,
+    /// policy for `maht`'s request parsing functionality
     pub request_policy: maht::RequestPolicy,
+    /// factor of last request size (including body) that is kept for next request on the same
+    /// TCP connection
+    pub factor_leniency: usize,
 }
 
-pub struct Endpoint {
-    pub methods: Vec<maht::Method>,
-    pub callback: CallbackFunc,
-}
-
-pub type CallbackFunc = Box<dyn Fn(Request) -> maht::Response + Send + Sync>;
+pub type EndpointFunc = Box<dyn Fn(Request) -> maht::Response + Send + Sync>;
 
 pub struct Request {
     addr: SocketAddr,
     http: maht::Request,
-    body: Option<Vec<u8>>
+    body: Option<Vec<u8>>,
 }
 
 pub fn ignite(
     Config {
         endpoints,
+        default_endpoint,
         addr,
         handler_config,
     }: Config,
 ) -> anyhow::Result<()> {
     eprintln!("Midnight233's Another Web Server is starting for {addr}");
     let listener = TcpListener::bind(addr)?;
-    let handlers = Arc::new(endpoints);
+    let endpoints = Arc::new(endpoints);
+    let default_endpoint = Arc::new(default_endpoint);
     let config = Arc::new(handler_config);
     loop {
         let (stream, addr) = listener.accept()?;
-        let handlers = handlers.clone();
+        let mut buf = StreamBuffer::new(stream, config.len_buf_bail);
+        let endpoints = endpoints.clone();
+        let default_endpoint = default_endpoint.clone();
         let config = config.clone();
         thread::spawn(move || {
             eprintln!("{addr}");
-            if let Err(err) = handle(stream, addr, handlers.clone(), config) {
-                eprintln!("{}", err);
+            loop {
+                if let Err(err) = handle(&mut buf, addr, &endpoints, &default_endpoint, &config) {
+                    eprintln!("{err}");
+                    return;
+                }
             }
         });
     }
 }
 
 fn handle(
-    mut stream: TcpStream,
+    buf: &mut StreamBuffer<TcpStream>,
     addr: SocketAddr,
-    endpoints: Arc<HashMap<String, Vec<Endpoint>>>,
-    config: Arc<HandlerConfig>,
-) -> anyhow::Result<()> {
-    let HandlerConfig {
+    endpoints: &EndpointMap,
+    default_endpoint: &EndpointFunc,
+    HandlerConfig {
         len_buf_bail,
         timeout_bail,
         request_policy,
-    } = config.as_ref();
-    let mut buf = vec![0; 1024];
-    let mut old_len = 0;
-    let mut len = stream.read(&mut buf)?;
+        factor_leniency,
+    }: &HandlerConfig,
+) -> anyhow::Result<()> {
     let now = Instant::now();
     let len_req = loop {
-        if let Some(len_rel) = identify_header(&buf[old_len..]) {
-            break len_rel + old_len;
+        let i_sniff = buf.len_old.saturating_sub(4);
+        if let Some(len_rel) = identify_header(&buf.buf_eff()[i_sniff..]) {
+            break i_sniff + len_rel;
         }
-        if &len == len_buf_bail {
+        if &buf.len == len_buf_bail {
             anyhow::bail!("did not find a header within toleratable buffer size")
         }
         if &now.elapsed() > timeout_bail {
             anyhow::bail!("did not find a header within toleratable interval")
         }
-        if len == buf.len() {
-            buf.resize(buf.len() * 2, 0);
-        }
-        let extra_len = stream.read(&mut buf[len..])?;
-        old_len = len;
-        len += extra_len;
+        buf.read()
+            .context("error reading the stream during header detection")?;
     };
-    let request = maht::Request::parse(&buf[..len_req], request_policy)?;
+    let request = maht::Request::parse(&buf.buf_eff()[..len_req], request_policy)?;
+    let endpoint = endpoints.get(&request.path)
+        .and_then(|x| x.get(&request.method))
+        .unwrap_or(default_endpoint);
+    let len_body = request.content_length(request_policy)?.unwrap_or(0) as usize;
+    let body = if len_body > 0 {
+        while buf.len < len_req + len_body {
+            buf.read()
+                .context("error reading the stream to get request body")?;
+        }
+        Some(buf.buf_eff()[len_req..(len_req + len_body)].to_vec())
+    } else {
+        None
+    };
+    let request = Request {
+        addr, http: request, body
+    };
+    buf.fit_factor(*factor_leniency);
+    buf.drop_earliest(len_req + len_body);
+    endpoint(request);
     Ok(())
 }
 
@@ -113,7 +139,10 @@ mod tests {
         hello, world\n, no, \ractually, hello, world\r\n\
         hello, world!!!\r\n\r\n!!!\
         ";
-        assert_eq!(identify_header(with_double_crlf), Some(with_double_crlf.len() - 3));
+        assert_eq!(
+            identify_header(with_double_crlf),
+            Some(with_double_crlf.len() - 3)
+        );
         let without_double_crlf = b"\
         hello, world\n, no, \ractually, hello, world\r\n\
         hello, world!!!\r\r\n\nlook at me!\

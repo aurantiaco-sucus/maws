@@ -40,13 +40,16 @@ impl Request {
         Ok(Self { method, path, version, headers })
     }
 
-    pub fn content_length(&self, policy: &RequestPolicy) -> anyhow::Result<u64> {
-        let values = self.headers.get("content-length")
-            .context("Content-Length not found in headers")?;
+    pub fn content_length(&self, policy: &RequestPolicy) -> anyhow::Result<Option<u64>> {
+        let values = if let Some(values) = self.headers.get("content-length") {
+            values
+        } else {
+            return Ok(None)
+        };
         if values.len() == 1 {
             let value = values[0].parse::<u64>()
                 .with_context(|| format!("unable to convert Content-Length value \"{}\" to u64", values[0]))?;
-            Ok(value)
+            Ok(Some(value))
         } else {
             match policy.duplicate_singleton {
                 RequestDuplicatSingletonPolicy::Reject => {
@@ -56,13 +59,13 @@ impl Request {
                     let value = values.first().unwrap();
                     let value = value.parse::<u64>()
                         .with_context(|| format!("unable to convert Content-Length value \"{}\" to u64", value))?;
-                    Ok(value)
+                    Ok(Some(value))
                 }
                 RequestDuplicatSingletonPolicy::Last => {
                     let value = values.last().unwrap();
                     let value = value.parse::<u64>()
                         .with_context(|| format!("unable to convert Content-Length value \"{}\" to u64", value))?;
-                    Ok(value)
+                    Ok(Some(value))
                 }
             }
         }
@@ -104,6 +107,7 @@ fn parse_start(line: &str) -> anyhow::Result<(Method, &str, Version)> {
     Ok((method, path, version))
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum Method {
     GET,
     HEAD,
@@ -182,5 +186,73 @@ impl From<Version> for &'static str {
 }
 
 pub struct Response {
+    pub version: Version,
+    pub status: Status,
+    pub headers: HashMap<String, Vec<String>>,
+    pub body: Vec<u8>,
+}
 
+pub enum Status {
+    Continue100,
+    SwitchingProtocols101,
+    Processing102,
+    EarlyHints103,
+    Ok200,
+    Created201,
+    Accepted202,
+    NonAuthoritativeInformation203,
+    NoContent204,
+    ResetContent205,
+    PartialContent206,
+    MultiStatus207,
+    AlreadyReported208,
+    ImUsed226,
+    MultipleChoices300,
+    MovedPermanently301,
+    Found302,
+    SeeOther303,
+    NotModified304,
+    UseProxy305,
+    TemporaryRedirect307,
+    PermanentRedirect308,
+    BadRequest400,
+    Unauthorized401,
+    PaymentRequired402,
+    Forbidden403,
+    NotFound404,
+    MethodNotAllowed405,
+    NotAcceptable406,
+    ProxyAuthenticationRequired407,
+    RequestTimeout408,
+    Conflict409,
+    Gone410,
+    LengthRequired411,
+    PreconditionFailed412,
+    ContentTooLarge413,
+    UriTooLong414,
+    UnsupportedMediaType415,
+    RangeNotSatisfiable416,
+    ExpectationFailed417,
+    ImATeapot418,
+    MisdirectedRequest421,
+    UnprocessableEntity422,
+    Locked423,
+    FailedDependency424,
+    TooEarly425,
+    UpgradeRequired426,
+    PreconditionRequired428,
+    TooManyRequests429,
+    RequestHeaderFieldsTooLarge431,
+    UnavailableForLegalReasons451,
+    InternalServerError500,
+    NotImplemented501,
+    BadGateway502,
+    ServiceUnavailable503,
+    GatewayTimeout504,
+    HttpVersionNotSupported505,
+    VariantAlsoNegotiates506,
+    InsufficientStorage507,
+    LoopDetected508,
+    NotExtended510,
+    NetworkAuthenticationRequired511,
 }
