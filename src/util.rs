@@ -45,4 +45,12 @@ impl <R: Read> StreamBuffer<R> {
         }
         self.buf.resize(self.len * f, 0);
     }
+
+    pub fn inner(&self) -> &R {
+        &self.inner
+    }
+
+    pub fn inner_mut(&mut self) -> &mut R {
+        &mut self.inner
+    }
 }

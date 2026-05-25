@@ -2,12 +2,14 @@ mod util;
 
 use crate::util::StreamBuffer;
 use anyhow::Context;
-use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::io::Read;
+use std::collections::{BTreeMap, HashMap};
+use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::{io, thread};
+use std::thread;
+
+pub use maht;
 
 pub struct Config {
     pub endpoints: EndpointMap,
@@ -16,27 +18,54 @@ pub struct Config {
     pub handler_config: HandlerConfig,
 }
 
-pub type EndpointMap = HashMap<String, BTreeMap<maht::Method, EndpointFunc>>;
+pub type EndpointMap = HashMap<maht::ByteString<true>, BTreeMap<maht::Method, EndpointFunc>>;
 
 #[derive(Clone)]
 pub struct HandlerConfig {
     /// length of buffer in bytes to bail out when a header is not identified
     pub len_buf_bail: usize,
     /// timeout before bailing out for not identifying a header
-    pub timeout_bail: Duration,
+    pub timeout_header: Duration,
     /// policy for `maht`'s request parsing functionality
     pub request_policy: maht::RequestPolicy,
     /// factor of last request size (including body) that is kept for next request on the same
     /// TCP connection
     pub factor_leniency: usize,
+    /// timeout before bailing out for unable to finish writing a part of the response
+    pub timeout_write: Duration,
 }
 
-pub type EndpointFunc = Box<dyn Fn(Request) -> maht::Response + Send + Sync>;
+impl Default for HandlerConfig {
+    fn default() -> Self {
+        Self {
+            len_buf_bail: 4096,
+            timeout_header: Duration::from_secs(10),
+            request_policy: maht::RequestPolicy::default(),
+            factor_leniency: 4,
+            timeout_write: Duration::from_secs(10),
+        }
+    }
+}
+
+pub type EndpointFunc = Box<dyn Fn(Request) -> Response + Send + Sync + 'static>;
+
+pub fn endpoint_func(func: impl Fn(Request) -> Response + Send + Sync + 'static) -> EndpointFunc {
+    Box::new(func)
+}
+
+pub fn endpoint(method: maht::Method, func: impl Fn(Request) -> Response + Send + Sync + 'static) -> (maht::Method, EndpointFunc) {
+    (method, endpoint_func(func))
+}
 
 pub struct Request {
-    addr: SocketAddr,
-    http: maht::Request,
-    body: Option<Vec<u8>>,
+    pub addr: SocketAddr,
+    pub http: maht::Request,
+    pub body: Option<Vec<u8>>,
+}
+
+pub struct Response {
+    pub http: maht::Response,
+    pub body: Option<Vec<u8>>,
 }
 
 pub fn ignite(
@@ -77,11 +106,14 @@ fn handle(
     default_endpoint: &EndpointFunc,
     HandlerConfig {
         len_buf_bail,
-        timeout_bail,
+        timeout_header,
         request_policy,
         factor_leniency,
+        timeout_write,
     }: &HandlerConfig,
 ) -> anyhow::Result<()> {
+    buf.inner_mut().set_write_timeout(Some(*timeout_write))
+        .context("unable to setup writing timeout")?;
     let now = Instant::now();
     let len_req = loop {
         let i_sniff = buf.len_old.saturating_sub(4);
@@ -91,13 +123,13 @@ fn handle(
         if &buf.len == len_buf_bail {
             anyhow::bail!("did not find a header within toleratable buffer size")
         }
-        if &now.elapsed() > timeout_bail {
+        if &now.elapsed() > timeout_header {
             anyhow::bail!("did not find a header within toleratable interval")
         }
         buf.read()
             .context("error reading the stream during header detection")?;
     };
-    let request = maht::Request::parse(&buf.buf_eff()[..len_req], request_policy)?;
+    let request = maht::Request::parse(&buf.buf_eff()[..(len_req - 4)], request_policy)?;
     let endpoint = endpoints.get(&request.path)
         .and_then(|x| x.get(&request.method))
         .unwrap_or(default_endpoint);
@@ -116,11 +148,23 @@ fn handle(
     };
     buf.fit_factor(*factor_leniency);
     buf.drop_earliest(len_req + len_body);
-    endpoint(request);
+    let response = endpoint(request);
+    let http_resp: Vec<u8> = (&response.http).into();
+    buf.inner_mut().write_all(&http_resp)
+        .context("unable to write all bytes of response header")?;
+    if let Some(body) = response.body {
+        buf.inner_mut().write_all(b"\r\n")
+            .context("unable to write response body")?;
+        buf.inner_mut().write_all(&body)
+            .context("unable to write response body")?;
+    }
     Ok(())
 }
 
 fn identify_header(buf: &[u8]) -> Option<usize> {
+    if buf.len() < 4 {
+        return None
+    }
     const DOUBLE_CRLF: &[u8] = b"\r\n\r\n";
     for i in 0..(buf.len() - 3) {
         if &buf[i..i + 4] == DOUBLE_CRLF {

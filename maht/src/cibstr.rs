@@ -1,16 +1,17 @@
 use std::borrow::Borrow;
+use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
 #[repr(transparent)]
 #[derive(Clone)]
-pub struct ByteString<const cs: bool>(Vec<u8>);
+pub struct ByteString<const CS: bool>(Vec<u8>);
 
 #[repr(transparent)]
-pub struct ByteStr<const cs: bool>([u8]);
+pub struct ByteStr<const CS: bool>([u8]);
 
 pub trait ToByteString: Sized {
-    fn to_byte_string<const cs: bool>(self) -> ByteString<cs>;
+    fn to_byte_string<const CS: bool>(self) -> ByteString<CS>;
 
     fn case_sensitive(self) -> ByteString<true> {
         self.to_byte_string::<true>()
@@ -22,13 +23,13 @@ pub trait ToByteString: Sized {
 }
 
 impl ToByteString for Vec<u8> {
-    fn to_byte_string<const cs: bool>(self) -> ByteString<cs> {
+    fn to_byte_string<const CS: bool>(self) -> ByteString<CS> {
         ByteString(self)
     }
 }
 
 pub trait ToByteStr {
-    fn to_byte_str<const cs: bool>(&self) -> &ByteStr<cs>;
+    fn to_byte_str<const CS: bool>(&self) -> &ByteStr<CS>;
 
     fn case_sensitive(&self) -> &ByteStr<true> {
         self.to_byte_str::<true>()
@@ -40,50 +41,50 @@ pub trait ToByteStr {
 }
 
 impl ToByteStr for [u8] {
-    fn to_byte_str<const cs: bool>(&self) -> &ByteStr<cs> {
-        unsafe { &*(self as *const [u8] as *const ByteStr<cs>) }
+    fn to_byte_str<const CS: bool>(&self) -> &ByteStr<CS> {
+        unsafe { &*(self as *const [u8] as *const ByteStr<CS>) }
     }
 }
 
-impl <const cs: bool> Borrow<ByteStr<cs>> for [u8] {
-    fn borrow(&self) -> &ByteStr<cs> {
+impl <const CS: bool> Borrow<ByteStr<CS>> for [u8] {
+    fn borrow(&self) -> &ByteStr<CS> {
         self.to_byte_str()
     }
 }
 
-impl <const cs: bool> AsRef<ByteStr<cs>> for [u8] {
-    fn as_ref(&self) -> &ByteStr<cs> {
+impl <const CS: bool> AsRef<ByteStr<CS>> for [u8] {
+    fn as_ref(&self) -> &ByteStr<CS> {
         self.to_byte_str()
     }
 }
 
-impl <const cs: bool, const n: usize> Borrow<ByteStr<cs>> for [u8; n] {
-    fn borrow(&self) -> &ByteStr<cs> {
+impl <const CS: bool, const N: usize> Borrow<ByteStr<CS>> for [u8; N] {
+    fn borrow(&self) -> &ByteStr<CS> {
         self.to_byte_str()
     }
 }
 
-impl <const cs: bool, const n: usize> AsRef<ByteStr<cs>> for [u8; n] {
-    fn as_ref(&self) -> &ByteStr<cs> {
+impl <const CS: bool, const N: usize> AsRef<ByteStr<CS>> for [u8; N] {
+    fn as_ref(&self) -> &ByteStr<CS> {
         self.to_byte_str()
     }
 }
 
-impl <const cs: bool> Deref for ByteString<cs> {
-    type Target = ByteStr<cs>;
+impl <const CS: bool> Deref for ByteString<CS> {
+    type Target = ByteStr<CS>;
     fn deref(&self) -> &Self::Target {
-        unsafe { &*((&self.0 as &[u8]) as *const [u8] as *const ByteStr<cs>) }
+        unsafe { &*((&self.0 as &[u8]) as *const [u8] as *const ByteStr<CS>) }
     }
 }
 
-impl <const cs: bool> Borrow<ByteStr<cs>> for ByteString<cs> {
-    fn borrow(&self) -> &ByteStr<cs> {
+impl <const CS: bool> Borrow<ByteStr<CS>> for ByteString<CS> {
+    fn borrow(&self) -> &ByteStr<CS> {
         self.deref()
     }
 }
 
-impl <const cs: bool> AsRef<ByteStr<cs>> for ByteString<cs> {
-    fn as_ref(&self) -> &ByteStr<cs> {
+impl <const CS: bool> AsRef<ByteStr<CS>> for ByteString<CS> {
+    fn as_ref(&self) -> &ByteStr<CS> {
         self.deref()
     }
 }
@@ -146,6 +147,15 @@ impl Hash for ByteString<false> {
     }
 }
 
+impl <const CS: bool> Debug for ByteStr<CS> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match std::str::from_utf8(self.0.as_ref()) {
+            Ok(val) => write!(f, "{val}"),
+            Err(err) => write!(f, "(string is invalid UTF-8: {err})")
+        }
+    }
+}
+
 impl ByteString<true> {
     pub fn case_insensitive(self) -> ByteString<false> {
         ByteString(self.0)
@@ -170,8 +180,14 @@ impl ByteStr<false> {
     }
 }
 
-impl <const cs: bool> ByteStr<cs> where ByteStr<cs>: Eq {
-    pub fn split_pat_naive<'a>(&'a self, pat: &'a Self) -> ByteStrSplitPatNaiveIterator<'a, cs> {
+impl <const CS: bool> ByteStr<CS> {
+    pub fn bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl <const CS: bool> ByteStr<CS> where ByteStr<CS>: Eq {
+    pub fn split_pat_naive<'a>(&'a self, pat: &'a Self) -> ByteStrSplitPatNaiveIterator<'a, CS> {
         ByteStrSplitPatNaiveIterator { string: self, pat }
     }
     
@@ -179,43 +195,47 @@ impl <const cs: bool> ByteStr<cs> where ByteStr<cs>: Eq {
         std::str::from_utf8(&self.0)
     }
     
-    pub fn to_owned(&self) -> ByteString<cs> {
+    pub fn to_owned(&self) -> ByteString<CS> {
         ByteString(self.0.to_vec())
     }
 }
 
-pub struct ByteStrSplitPatNaiveIterator<'a, const cs: bool> where ByteStr<cs>: Eq {
-    string: &'a ByteStr<cs>,
-    pat: &'a ByteStr<cs>
+pub struct ByteStrSplitPatNaiveIterator<'a, const CS: bool> where ByteStr<CS>: Eq {
+    string: &'a ByteStr<CS>,
+    pat: &'a ByteStr<CS>
 }
 
-impl <'a, const cs: bool> Iterator for ByteStrSplitPatNaiveIterator<'a, cs>  where ByteStr<cs>: Eq {
-    type Item = &'a ByteStr<cs>;
+impl <'a, const CS: bool> Iterator for ByteStrSplitPatNaiveIterator<'a, CS>  where ByteStr<CS>: Eq {
+    type Item = &'a ByteStr<CS>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.string.0.len() == 0 {
+        if self.string.0.is_empty() {
             return None
         }
         let i = self.string.0.windows(self.pat.0.len())
-            .position(|x| x.to_byte_str::<cs>() == self.pat)
+            .position(|x| x.to_byte_str::<CS>() == self.pat)
             .unwrap_or(self.string.0.len());
         let ret = self.string.0[..i].to_byte_str();
-        self.string = self.string.0[(i + self.pat.0.len())..].to_byte_str();
+        if i + self.pat.0.len() < self.string.0.len() {
+            self.string = self.string.0[(i + self.pat.0.len())..].to_byte_str();
+        } else {
+            self.string = self.string.0[..0].to_byte_str();
+        }
         Some(ret)
     }
 }
 
-pub const fn make_const_byte_str<const cs: bool>(slice: &'static [u8]) -> &'static ByteStr<cs> {
-    unsafe { &*(slice as *const [u8] as *const ByteStr<cs>) }
+pub const fn make_const_byte_str<const CS: bool>(slice: &'static [u8]) -> &'static ByteStr<CS> {
+    unsafe { &*(slice as *const [u8] as *const ByteStr<CS>) }
 }
 
 #[macro_export]
 macro_rules! byte_str {
     (s:$lit:literal) => {
-        $crate::byte_string::make_const_byte_str($lit)
+        $crate::cibstr::make_const_byte_str($lit)
     };
     (i:$lit:literal) => {
-        $crate::byte_string::make_const_byte_str($lit)
+        $crate::cibstr::make_const_byte_str($lit)
     };
 }
 
@@ -223,16 +243,16 @@ macro_rules! byte_str {
 macro_rules! const_byte_str {
     ($name:ident = s:$val:literal) => {
         #[allow(non_upper_case_globals)]
-        const $name: &$crate::byte_string::ByteStr<true> = $crate::byte_string::make_const_byte_str($val);
+        const $name: &$crate::cibstr::ByteStr<true> = $crate::cibstr::make_const_byte_str($val);
     };
     ($name:ident = i:$val:literal) => {
         #[allow(non_upper_case_globals)]
-        const $name: &$crate::byte_string::ByteStr<false> = $crate::byte_string::make_const_byte_str($val);
+        const $name: &$crate::cibstr::ByteStr<false> = $crate::cibstr::make_const_byte_str($val);
     };
     (pub $name:ident = s:$val:literal) => {
-        pub const $name: &$crate::byte_string::ByteStr<true> = $crate::byte_string::make_const_byte_str($val);
+        pub const $name: &$crate::cibstr::ByteStr<true> = $crate::cibstr::make_const_byte_str($val);
     };
     (pub $name:ident = i:$val:literal) => {
-        pub const $name: &$crate::byte_string::ByteStr<false> = $crate::byte_string::make_const_byte_str($val);
+        pub const $name: &$crate::cibstr::ByteStr<false> = $crate::cibstr::make_const_byte_str($val);
     };
 }
