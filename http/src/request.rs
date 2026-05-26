@@ -4,9 +4,53 @@ use anyhow::Context;
 
 pub struct Request {
     pub method: Method,
-    pub path: ByteString<true>,
+    pub target: RequestTarget,
     pub version: Version,
     pub headers: Headers,
+}
+
+pub enum RequestTarget {
+    Origin(Vec<String>),
+    Absolute(String),
+    Authority(String, u16),
+}
+
+impl RequestTarget {
+    pub fn parse(src: &ByteStr<true>) -> anyhow::Result<Self> {
+        if src.bytes()[0] == b'/' {
+            if src.bytes().len() == 1 {
+                return Ok(RequestTarget::Origin(Vec::new()));
+            }
+            let mut segments = Vec::new();
+            for segment in src.bytes()[1..]
+                .case_sensitive()
+                .split_pat_naive(byte_str!(s:b"/"))
+            {
+                segments.push(
+                    segment
+                        .as_str()
+                        .context("unable to parse request target into UTF-8")?
+                        .to_owned(),
+                );
+            }
+            return Ok(RequestTarget::Origin(segments))
+        }
+        if src.bytes().contains(&b':') && !src.bytes().contains(&b'/') {
+            let i_port = src.bytes().iter().position(|x| x == &b':').unwrap();
+            let authority = src.bytes()[..i_port].case_sensitive().as_str()
+                .context("authority is not valid UTF-8")?
+                .to_owned();
+            let i_port = src.bytes()[i_port..].case_insensitive().as_str()
+                .context("port number contains invalid character(s)")?;
+            let port = str::parse(i_port)
+                .context("unable to parse port number to u16")?;
+            return Ok(RequestTarget::Authority(authority, port))
+        }
+        let absolute = src.as_str()
+            .context("unable to parse the absolute form target to string")?
+            .to_owned();
+        Ok(RequestTarget::Absolute(absolute))
+    }
 }
 
 #[derive(Clone, Default)]
@@ -45,11 +89,11 @@ impl Request {
             .take_until_dropped_pattern(b"\r\n")
             .context("request is malformed")?;
         let (method, path, version) = parse_start(start.case_insensitive())?;
-        let path = path.to_owned();
+        let target = RequestTarget::parse(path)?;
         let headers = Headers::parse(&value, &policy.header)?;
         Ok(Self {
             method,
-            path,
+            target,
             version,
             headers,
         })
@@ -137,13 +181,16 @@ mod tests {
         assert_eq!(req.content_length(&pol).unwrap().unwrap(), 49);
         let Request {
             method,
-            path,
+            target: path,
             version,
             headers,
         } = req;
         assert_eq!(method, Method::POST);
         assert_eq!(path.as_ref(), byte_str!(s:b"/users"));
         assert_eq!(version, Version::Http11);
-        assert_eq!(headers.get(b"content-type").unwrap(), [byte_str!(s:b"application/x-www-form-urlencoded")]);
+        assert_eq!(
+            headers.get(b"content-type").unwrap(),
+            [byte_str!(s:b"application/x-www-form-urlencoded")]
+        );
     }
 }

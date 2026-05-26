@@ -13,7 +13,15 @@ name = "maws"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "maws_html",
  "maws_http",
+]
+
+[[package]]
+name = "maws_html"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
 ]
 
 [[package]]

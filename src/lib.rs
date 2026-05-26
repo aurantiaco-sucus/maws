@@ -1,4 +1,5 @@
 mod util;
+pub mod ext;
 
 use crate::util::StreamBuffer;
 use anyhow::Context;
@@ -130,7 +131,7 @@ fn handle(
             .context("error reading the stream during header detection")?;
     };
     let request = http::Request::parse(&buf.buf_eff()[..(len_req - 4)], request_policy)?;
-    let endpoint = endpoints.get(&request.path)
+    let endpoint = endpoints.get(&request.target)
         .and_then(|x| x.get(&request.method))
         .unwrap_or(default_endpoint);
     let len_body = request.content_length(request_policy)?.unwrap_or(0) as usize;

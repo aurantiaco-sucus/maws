@@ -5,10 +5,11 @@ edition = "2024"
 
 [dependencies]
 maws_http = { path = "http" }
+maws_html = { path = "html" }
 anyhow = { workspace = true }
 
 [workspace]
-members = ["http"]
+members = ["html","http"]
 
 [workspace.dependencies]
 anyhow = "1.0.102"
