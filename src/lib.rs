@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::thread;
 
-pub use maht;
+pub use maws_http as http;
 
 pub struct Config {
     pub endpoints: EndpointMap,
@@ -18,7 +18,7 @@ pub struct Config {
     pub handler_config: HandlerConfig,
 }
 
-pub type EndpointMap = HashMap<maht::ByteString<true>, BTreeMap<maht::Method, EndpointFunc>>;
+pub type EndpointMap = HashMap<http::ByteString<true>, BTreeMap<http::Method, EndpointFunc>>;
 
 #[derive(Clone)]
 pub struct HandlerConfig {
@@ -26,8 +26,8 @@ pub struct HandlerConfig {
     pub len_buf_bail: usize,
     /// timeout before bailing out for not identifying a header
     pub timeout_header: Duration,
-    /// policy for `maht`'s request parsing functionality
-    pub request_policy: maht::RequestPolicy,
+    /// policy for `http`'s request parsing functionality
+    pub request_policy: http::RequestPolicy,
     /// factor of last request size (including body) that is kept for next request on the same
     /// TCP connection
     pub factor_leniency: usize,
@@ -40,7 +40,7 @@ impl Default for HandlerConfig {
         Self {
             len_buf_bail: 4096,
             timeout_header: Duration::from_secs(10),
-            request_policy: maht::RequestPolicy::default(),
+            request_policy: http::RequestPolicy::default(),
             factor_leniency: 4,
             timeout_write: Duration::from_secs(10),
         }
@@ -53,18 +53,18 @@ pub fn endpoint_func(func: impl Fn(Request) -> Response + Send + Sync + 'static)
     Box::new(func)
 }
 
-pub fn endpoint(method: maht::Method, func: impl Fn(Request) -> Response + Send + Sync + 'static) -> (maht::Method, EndpointFunc) {
+pub fn endpoint(method: http::Method, func: impl Fn(Request) -> Response + Send + Sync + 'static) -> (http::Method, EndpointFunc) {
     (method, endpoint_func(func))
 }
 
 pub struct Request {
     pub addr: SocketAddr,
-    pub http: maht::Request,
+    pub http: http::Request,
     pub body: Option<Vec<u8>>,
 }
 
 pub struct Response {
-    pub http: maht::Response,
+    pub http: http::Response,
     pub body: Option<Vec<u8>>,
 }
 
@@ -129,7 +129,7 @@ fn handle(
         buf.read()
             .context("error reading the stream during header detection")?;
     };
-    let request = maht::Request::parse(&buf.buf_eff()[..(len_req - 4)], request_policy)?;
+    let request = http::Request::parse(&buf.buf_eff()[..(len_req - 4)], request_policy)?;
     let endpoint = endpoints.get(&request.path)
         .and_then(|x| x.get(&request.method))
         .unwrap_or(default_endpoint);

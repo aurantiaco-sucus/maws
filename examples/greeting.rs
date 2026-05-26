@@ -1,22 +1,22 @@
 use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
 use std::str::FromStr;
-use maws::maht;
+use maws::http;
 
-maht::const_byte_str!(GREETING = s:b"Hello, World!");
-maht::const_byte_str!(GREETING_LEN = s:b"13");
+http::const_byte_str!(GREETING = s:b"Hello, World!");
+http::const_byte_str!(GREETING_LEN = s:b"13");
 
 fn main() {
     let config = maws::Config {
         endpoints: HashMap::from([
-            (maht::byte_str!(s:b"/").to_owned(), BTreeMap::from([
-                maws::endpoint(maht::Method::GET, |req: maws::Request| {
-                    let mut headers = maht::Headers::default();
+            (http::byte_str!(s:b"/").to_owned(), BTreeMap::from([
+                maws::endpoint(http::Method::GET, |req: maws::Request| {
+                    let mut headers = http::Headers::default();
                     headers.insert(b"Content-Length", GREETING_LEN.to_owned());
                     maws::Response {
-                        http: maht::Response {
+                        http: http::Response {
                             version: req.http.version,
-                            status: maht::Status::Ok200,
+                            status: http::Status::Ok200,
                             headers,
                         },
                         body: Some(GREETING.bytes().to_owned())
@@ -26,10 +26,10 @@ fn main() {
         ]),
         default_endpoint: maws::endpoint_func(|req| {
             maws::Response {
-                http: maht::Response {
+                http: http::Response {
                     version: req.http.version,
-                    status: maht::Status::NotFound404,
-                    headers: maht::Headers::default(),
+                    status: http::Status::NotFound404,
+                    headers: http::Headers::default(),
                 },
                 body: None
             }
