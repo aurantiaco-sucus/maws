@@ -6,6 +6,7 @@ mod method;
 mod version;
 mod request;
 mod response;
+mod cistr;
 
 pub use status::*;
 pub use headers::*;
@@ -14,3 +15,4 @@ pub use method::*;
 pub use version::*;
 pub use request::*;
 pub use response::*;
+pub use cistr::*;

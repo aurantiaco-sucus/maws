@@ -1,14 +1,16 @@
-use crate::{const_byte_str, ByteStr};
+use crate::{AsCaseInsensitive, CaseInsensitiveStr};
 
-const_byte_str!(GET = i:b"GET");
-const_byte_str!(HEAD = i:b"HEAD");
-const_byte_str!(POST = i:b"POST");
-const_byte_str!(PUT = i:b"PUT");
-const_byte_str!(DELETE = i:b"DELETE");
-const_byte_str!(CONNECT = i:b"CONNECT");
-const_byte_str!(OPTIONS = i:b"OPTIONS");
-const_byte_str!(TRACE = i:b"TRACE");
-const_byte_str!(PATCH = i:b"PATCH");
+pub mod method_names {
+    pub const GET: &str = "GET";
+    pub const HEAD: &str = "HEAD";
+    pub const POST: &str = "POST";
+    pub const PUT: &str = "PUT";
+    pub const DELETE: &str = "DELETE";
+    pub const CONNECT: &str = "CONNECT";
+    pub const OPTIONS: &str = "OPTIONS";
+    pub const TRACE: &str = "TRACE";
+    pub const PATCH: &str = "PATCH";
+}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum Method {
@@ -23,45 +25,42 @@ pub enum Method {
     PATCH,
 }
 
-impl TryFrom<&ByteStr<false>> for Method {
-    type Error = anyhow::Error;
-    fn try_from(value: &ByteStr<false>) -> Result<Self, Self::Error> {
-        if value == GET {
-            Ok(Method::GET)
-        } else if value == HEAD {
-            Ok(Method::HEAD)
-        } else if value == POST {
-            Ok(Method::POST)
-        } else if value == PUT {
-            Ok(Method::PUT)
-        } else if value == DELETE {
-            Ok(Method::DELETE)
-        } else if value == CONNECT {
-            Ok(Method::CONNECT)
-        } else if value == OPTIONS {
-            Ok(Method::OPTIONS)
-        } else if value == TRACE {
-            Ok(Method::TRACE)
-        } else if value == PATCH {
-            Ok(Method::PATCH)
+impl Method {
+    pub fn parse(value: &CaseInsensitiveStr) -> Option<Self> {
+        if value == method_names::GET.case_insensitive() {
+            Some(Self::GET)
+        } else if value == method_names::HEAD.case_insensitive() {
+            Some(Self::HEAD)
+        } else if value == method_names::POST.case_insensitive() {
+            Some(Self::POST)
+        } else if value == method_names::PUT.case_insensitive() {
+            Some(Self::PUT)
+        } else if value == method_names::DELETE.case_insensitive() {
+            Some(Self::DELETE)
+        } else if value == method_names::CONNECT.case_insensitive() {
+            Some(Self::CONNECT)
+        } else if value == method_names::OPTIONS.case_insensitive() {
+            Some(Self::OPTIONS)
+        } else if value == method_names::TRACE.case_insensitive() {
+            Some(Self::TRACE)
+        } else if value == method_names::PATCH.case_insensitive() {
+            Some(Self::PATCH)
         } else {
-            Err(anyhow::anyhow!("unknown method"))
+            None
         }
     }
-}
-
-impl From<Method> for &'static ByteStr<false> {
-    fn from(value: Method) -> Self {
-        match value {
-            Method::GET => GET,
-            Method::HEAD => HEAD,
-            Method::POST => POST,
-            Method::PUT => PUT,
-            Method::DELETE => DELETE,
-            Method::CONNECT => CONNECT,
-            Method::OPTIONS => OPTIONS,
-            Method::TRACE => TRACE,
-            Method::PATCH => PATCH,
+    
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::GET => method_names::GET,
+            Self::HEAD => method_names::HEAD,
+            Self::POST => method_names::POST,
+            Self::PUT => method_names::PUT,
+            Self::DELETE => method_names::DELETE,
+            Self::CONNECT => method_names::CONNECT,
+            Self::OPTIONS => method_names::OPTIONS,
+            Self::TRACE => method_names::TRACE,
+            Self::PATCH => method_names::PATCH,
         }
     }
 }

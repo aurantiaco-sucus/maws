@@ -15,15 +15,13 @@ impl From<&Response> for Vec<u8> {
         }: &Response,
     ) -> Self {
         let mut buf = Vec::with_capacity(512);
-        let version_str: &ByteStr<false> = (*version).into();
-        buf.extend(version_str.bytes());
+        buf.extend(version.as_str().bytes());
         buf.push(b' ');
-        let status_str: &ByteStr<false> = (*status).into();
-        buf.extend(status_str.bytes());
+        buf.extend(status.as_str().bytes());
         buf.extend(b"\r\n");
         for (k, v) in headers.iter() {
             for v in v {
-                buf.extend(k.bytes().trim_ascii());
+                buf.extend(k.case_sensitive().trim_ascii().bytes());
                 buf.extend(b": ");
                 buf.extend(v.bytes());
                 buf.extend(b"\r\n");
