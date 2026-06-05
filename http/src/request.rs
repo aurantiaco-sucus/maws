@@ -1,5 +1,4 @@
-use crate::util::ByteSliceRefExt;
-use crate::{ByteStr, ByteString, HeaderPolicy, Headers, Method, ToByteStr, Version, byte_str, AsCaseInsensitive};
+use crate::{AsCaseInsensitive, HeaderPolicy, Headers, Method, Version};
 use anyhow::Context;
 
 pub struct Request {
@@ -140,7 +139,7 @@ mod tests {
             headers,
         } = req;
         assert_eq!(method, Method::POST);
-        assert_eq!(target, RequestTarget::Origin(vec!["users".to_string()]));
+        assert_eq!(target, RequestTarget::Origin("/users".to_string()));
         assert_eq!(version, Version::Http11);
         assert_eq!(
             headers.get("content-type".case_insensitive()).unwrap(),
