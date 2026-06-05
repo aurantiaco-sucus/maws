@@ -1,5 +1,7 @@
 mod util;
 pub mod ext;
+pub mod route;
+pub mod handler;
 
 use crate::util::StreamBuffer;
 use anyhow::Context;
@@ -11,10 +13,11 @@ use std::time::{Duration, Instant};
 use std::thread;
 
 pub use maws_http as http;
+use maws_http::RequestTarget;
+use crate::route::Routes;
 
 pub struct Config {
-    pub endpoints: EndpointMap,
-    pub default_endpoint: EndpointFunc,
+    pub routes: route::Routes,
     pub addr: SocketAddr,
     pub handler_config: HandlerConfig,
 }
@@ -71,27 +74,24 @@ pub struct Response {
 
 pub fn ignite(
     Config {
-        endpoints,
-        default_endpoint,
+        routes,
         addr,
         handler_config,
     }: Config,
 ) -> anyhow::Result<()> {
     eprintln!("Midnight233's Another Web Server is starting for {addr}");
     let listener = TcpListener::bind(addr)?;
-    let endpoints = Arc::new(endpoints);
-    let default_endpoint = Arc::new(default_endpoint);
+    let routes = Arc::new(routes);
     let config = Arc::new(handler_config);
     loop {
         let (stream, addr) = listener.accept()?;
         let mut buf = StreamBuffer::new(stream, config.len_buf_bail);
-        let endpoints = endpoints.clone();
-        let default_endpoint = default_endpoint.clone();
+        let routes = routes.clone();
         let config = config.clone();
         thread::spawn(move || {
             eprintln!("{addr}");
             loop {
-                if let Err(err) = handle(&mut buf, addr, &endpoints, &default_endpoint, &config) {
+                if let Err(err) = handle(&mut buf, addr, &routes, &config) {
                     eprintln!("{err}");
                     return;
                 }
@@ -103,8 +103,7 @@ pub fn ignite(
 fn handle(
     buf: &mut StreamBuffer<TcpStream>,
     addr: SocketAddr,
-    endpoints: &EndpointMap,
-    default_endpoint: &EndpointFunc,
+    routes: &Routes,
     HandlerConfig {
         len_buf_bail,
         timeout_header,
@@ -130,8 +129,16 @@ fn handle(
         buf.read()
             .context("error reading the stream during header detection")?;
     };
-    let request = http::Request::parse(&buf.buf_eff()[..(len_req - 4)], request_policy)?;
-    let endpoint = endpoints.get(&request.target)
+    let request = String::from_utf8(buf.buf_eff()[..(len_req - 4)].to_vec())
+        .context("request is not valid UTF-8")?;
+    let request = http::Request::parse(&request, request_policy)?;
+    let target = match &request.target {
+        RequestTarget::Origin(path) => path,
+        _ => anyhow::bail!("invalid request origin: {:?}", request.target)
+    };
+    let (handler, args) = routes.lookup(target)
+        .with_context(|| format!("handler not found for path: {target}"))?;
+    let endpoint = handler.get(&request.target)
         .and_then(|x| x.get(&request.method))
         .unwrap_or(default_endpoint);
     let len_body = request.content_length(request_policy)?.unwrap_or(0) as usize;

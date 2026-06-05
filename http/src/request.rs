@@ -11,7 +11,7 @@ pub struct Request {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum RequestTarget {
-    Origin(Vec<String>),
+    Origin(String),
     Absolute(String),
     Authority(String, u16),
 }
@@ -19,14 +19,7 @@ pub enum RequestTarget {
 impl RequestTarget {
     pub fn parse(src: &str) -> anyhow::Result<Self> {
         if src.starts_with('/') {
-            if src.len() == 1 {
-                return Ok(RequestTarget::Origin(Vec::new()));
-            }
-            let mut segments = Vec::new();
-            for segment in src[1..].split('/') {
-                segments.push(segment.to_owned());
-            }
-            return Ok(RequestTarget::Origin(segments))
+            return Ok(RequestTarget::Origin(src.to_owned()))
         }
         if src.contains(':') && !src.contains('/') {
             let (authority, port) = src.split_once(':').unwrap();

@@ -1,4 +1,4 @@
-use crate::{ByteStr, Headers, Status, Version};
+use crate::{Headers, Status, Version};
 
 pub struct Response {
     pub version: Version,
@@ -21,7 +21,7 @@ impl From<&Response> for Vec<u8> {
         buf.extend(b"\r\n");
         for (k, v) in headers.iter() {
             for v in v {
-                buf.extend(k.case_sensitive().trim_ascii().bytes());
+                buf.extend(k.case_sensitive_ref().trim_ascii().bytes());
                 buf.extend(b": ");
                 buf.extend(v.bytes());
                 buf.extend(b"\r\n");
@@ -33,8 +33,6 @@ impl From<&Response> for Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // quote from https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Messages
     const RESPONSE: &[u8] = b"\
     HTTP/1.1 201 Created\r\n\
