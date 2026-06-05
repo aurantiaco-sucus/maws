@@ -3,14 +3,14 @@ use std::fmt::{Debug, Formatter};
 use crate::http;
 
 pub struct Request {
-    http: http::Request,
-    arguments: Vec<String>,
-    query: HashMap<String, String>,
+    pub http: http::Request,
+    pub arguments: Vec<String>,
+    pub query: HashMap<String, Vec<String>>,
 }
 
 pub struct Response {
-    http: http::Response,
-    body: Option<Vec<u8>>
+    pub http: http::Response,
+    pub body: Option<Vec<u8>>
 }
 
 pub struct Handler(Box<dyn Fn(Request) -> Response + Send + Sync>);
@@ -22,7 +22,7 @@ impl Debug for Handler {
 }
 
 impl Handler {
-    fn handle(&self, req: Request) -> Response {
+    pub fn handle(&self, req: Request) -> Response {
         self.0(req)
     }
 }

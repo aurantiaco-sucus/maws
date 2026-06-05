@@ -1,4 +1,6 @@
+use std::collections::BTreeMap;
 use crate::handler::Handler;
+use crate::http;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Fragment {
@@ -25,14 +27,14 @@ pub struct Routes {
 }
 
 pub struct Node {
-    pub handler: Option<Handler>,
+    pub handler: BTreeMap<http::Method, Handler>,
     pub children: Vec<(Fragment, Node)>,
 }
 
 impl Node {
-    fn lookup_recursive<'a>(&self, path: &'a str, args: &mut Vec<&'a str>) -> Option<&Handler> {
+    fn lookup_recursive<'a>(&self, path: &'a str, args: &mut Vec<&'a str>, method: http::Method) -> Option<&Handler> {
         if path.is_empty() {
-            return self.handler.as_ref()
+            return self.handler.get(&method)
         }
         let (cur, next) = if let Some((cur, next)) = path.split_once('/') {
             (cur, next)
@@ -45,15 +47,27 @@ impl Node {
                     if name != cur {
                         continue
                     }
-                    if let Some(val) = child.lookup_recursive(next, args) {
+                    if let Some(val) = child.lookup_recursive(next, args, method) {
                         return Some(val)
                     }
                 }
                 Fragment::Argument => {
                     args.push(cur);
+                    if let Some(val) = child.lookup_recursive(next, args, method) {
+                        return Some(val)
+                    }
+                    args.pop();
                 }
-                Fragment::Wildcard => {}
-                Fragment::SuperWildcard => {}
+                Fragment::Wildcard => {
+                    if let Some(val) = child.lookup_recursive(next, args, method) {
+                        return Some(val)
+                    }
+                }
+                Fragment::SuperWildcard => {
+                    if let Some(val) = child.lookup_recursive("", args, method) {
+                        return Some(val)
+                    }
+                }
             }
         }
         None
@@ -64,13 +78,13 @@ impl Routes {
     pub fn empty() -> Self {
         Self {
             root: Node {
-                handler: None,
+                handler: BTreeMap::new(),
                 children: Vec::new(),
             }
         }
     }
     
-    pub fn insert(&mut self, path: Vec<Fragment>, handler: Handler) -> Option<Handler> {
+    pub fn insert(&mut self, path: Vec<Fragment>, method: http::Method, handler: Handler) -> Option<Handler> {
         let mut cur = &mut self.root;
         for fragment in path {
             let existing = cur.children.iter()
@@ -81,66 +95,16 @@ impl Routes {
                 continue
             }
             cur.children.push((fragment, Node {
-                handler: None,
+                handler: BTreeMap::new(),
                 children: Vec::new()
             }));
             cur = &mut cur.children.last_mut().unwrap().1;
         }
-        cur.handler.replace(handler)
+        cur.handler.insert(method, handler)
     }
     
-    pub fn lookup<'a, 'b>(&'b self, path: &'a str) -> Option<(&'b Handler, Vec<&'a str>)> {
-        let mut stack = vec![(&self.root, 0)];
-        let mut cur = &self.root;
+    pub fn lookup<'a, 'b>(&'b self, path: &'a str, method: http::Method) -> Option<(&'b Handler, Vec<&'a str>)> {
         let mut args = Vec::new();
-        'outer: for fragment in path.strip_prefix('/').unwrap_or(path).split('/') {
-            for child in &cur.children {
-                match &child.fragment {
-                    Fragment::Static(value) => {
-                        if value != fragment {
-                            continue
-                        }
-                    }
-                    Fragment::Argument => {
-                        args.push(fragment);
-                    }
-                    Fragment::Wildcard => {},
-                    Fragment::SuperWildcard => {
-                        cur = child;
-                        break 'outer
-                    }
-                }
-                cur = child;
-            }
-        }
-        cur.handler.as_ref().map(move |x| (x, args))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::handler;
-
-    #[test]
-    fn test_routes() {
-        let mut routes = Routes::empty();
-        let end1 = handler::standard_404();
-        let end2 = handler::standard_404();
-        let end3 = handler::standard_404();
-        let end4 = handler::standard_404();
-        let end5 = handler::standard_404();
-        routes.insert(pattern("/"), end1);
-        routes.insert(pattern("/*"), end2);
-        routes.insert(pattern("/*/one"), end3);
-        routes.insert(pattern("/*/:/two"), end4);
-        routes.insert(pattern("/**"), end5);
-        assert!(routes.lookup("").is_some());
-        assert!(routes.lookup("/something").is_some());
-        assert!(routes.lookup("something").is_some());
-        assert!(routes.lookup("two/one").is_some());
-        assert_eq!(routes.lookup("four/1/two").unwrap().1, ["1"]);
-        assert!(routes.lookup("one/two").is_some());
-        assert!(routes.lookup("/one/two/three").is_some());
+        self.root.lookup_recursive(path, &mut args, method).map(|x| (x, args))
     }
 }

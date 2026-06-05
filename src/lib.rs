@@ -1,11 +1,11 @@
 mod util;
-pub mod ext;
 pub mod route;
 pub mod handler;
+pub mod query;
+pub mod ext;
 
 use crate::util::StreamBuffer;
 use anyhow::Context;
-use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
@@ -13,16 +13,12 @@ use std::time::{Duration, Instant};
 use std::thread;
 
 pub use maws_http as http;
-use maws_http::RequestTarget;
-use crate::route::Routes;
 
 pub struct Config {
     pub routes: route::Routes,
     pub addr: SocketAddr,
     pub handler_config: HandlerConfig,
 }
-
-pub type EndpointMap = HashMap<http::ByteString<true>, BTreeMap<http::Method, EndpointFunc>>;
 
 #[derive(Clone)]
 pub struct HandlerConfig {
@@ -49,27 +45,6 @@ impl Default for HandlerConfig {
             timeout_write: Duration::from_secs(10),
         }
     }
-}
-
-pub type EndpointFunc = Box<dyn Fn(Request) -> Response + Send + Sync + 'static>;
-
-pub fn endpoint_func(func: impl Fn(Request) -> Response + Send + Sync + 'static) -> EndpointFunc {
-    Box::new(func)
-}
-
-pub fn endpoint(method: http::Method, func: impl Fn(Request) -> Response + Send + Sync + 'static) -> (http::Method, EndpointFunc) {
-    (method, endpoint_func(func))
-}
-
-pub struct Request {
-    pub addr: SocketAddr,
-    pub http: http::Request,
-    pub body: Option<Vec<u8>>,
-}
-
-pub struct Response {
-    pub http: http::Response,
-    pub body: Option<Vec<u8>>,
 }
 
 pub fn ignite(
@@ -103,7 +78,7 @@ pub fn ignite(
 fn handle(
     buf: &mut StreamBuffer<TcpStream>,
     addr: SocketAddr,
-    routes: &Routes,
+    routes: &route::Routes,
     HandlerConfig {
         len_buf_bail,
         timeout_header,
@@ -133,14 +108,13 @@ fn handle(
         .context("request is not valid UTF-8")?;
     let request = http::Request::parse(&request, request_policy)?;
     let target = match &request.target {
-        RequestTarget::Origin(path) => path,
+        http::RequestTarget::Origin(path) => path,
         _ => anyhow::bail!("invalid request origin: {:?}", request.target)
     };
-    let (handler, args) = routes.lookup(target)
+    let (path, query) = target.split_once("?").unwrap_or((target, ""));
+    let query = query::parse(query)?;
+    let (handler, args) = routes.lookup(path, request.method)
         .with_context(|| format!("handler not found for path: {target}"))?;
-    let endpoint = handler.get(&request.target)
-        .and_then(|x| x.get(&request.method))
-        .unwrap_or(default_endpoint);
     let len_body = request.content_length(request_policy)?.unwrap_or(0) as usize;
     let body = if len_body > 0 {
         while buf.len < len_req + len_body {
@@ -151,12 +125,13 @@ fn handle(
     } else {
         None
     };
-    let request = Request {
-        addr, http: request, body
-    };
     buf.fit_factor(*factor_leniency);
     buf.drop_earliest(len_req + len_body);
-    let response = endpoint(request);
+    let response = handler.handle(handler::Request {
+        http: request,
+        arguments: args.iter().map(|x| x.to_owned()).collect(),
+        query,
+    });
     let http_resp: Vec<u8> = (&response.http).into();
     buf.inner_mut().write_all(&http_resp)
         .context("unable to write all bytes of response header")?;
